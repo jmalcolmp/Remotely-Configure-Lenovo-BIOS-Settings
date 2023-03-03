@@ -1,0 +1,202 @@
+$CSV_Wordbank = @"
+WakeOnLAN,Disable
+WakeOnLANDock,Enable
+IPv4NetworkStack,Enable
+IPv6NetworkStack,Enable
+UefiPxeBootPriority,IPv4First
+WirelessAutoDisconnection,Disable
+MACAddressPassThrough,Disable
+AlwaysOnUSB,Enable
+TrackPoint,Enable
+TouchPad,Enable
+FnCtrlKeySwap,Disable
+FnSticky,Disable
+FnKeyAsPrimary,Disable
+BootDisplayDevice,LCD
+UMAFramebufferSize,Auto
+BootTimeExtension,Disable
+CPUPowerManagement,Enable
+OnByAcAttach,Disable
+PasswordBeep,Disable
+KeyboardBeep,Disable
+SystemManagementPasswordControl,Disable
+PowerOnPasswordControl,Disable
+HardDiskPasswordControl,Disable
+BIOSSetupConfigurations,Disable
+BlockSIDAuthentication,Enable
+LockBIOSSetting,Disable
+MinimumPasswordLength,Disable
+BIOSPasswordAtUnattendedBoot,Enable
+BIOSPasswordAtReboot,Disable
+BIOSPasswordAtBootDeviceList,Disable
+PasswordCountExceededError,Enable
+FingerprintPredesktopAuthentication,Enable
+FingerprintSecurityMode,Normal
+FingerprintPasswordAuthentication,Enable
+SecurityChip,Active
+PhysicalPresenceForTpmClear,Enable
+BIOSUpdateByEndUsers,Enable
+SecureRollBackPrevention,Enable
+WindowsUEFIFirmwareUpdate,Enable
+DataExecutionPrevention,Enable
+AmdVt,Enable
+EnhancedWindowsBiometricSecurity,Disable
+EthernetLANAccess,Enable
+WirelessLANAccess,Enable
+WirelessWANAccess,Enable
+BluetoothAccess,Enable
+USBPortAccess,Enable
+IntegratedCameraAccess,Enable
+IntegratedAudioAccess,Enable
+MicrophoneAccess,Enable
+NfcAccess,Enable
+BottomCoverTamperDetected,Disable
+InternalStorageTamper,Disable
+AbsolutePersistenceModuleActivation,Disable
+SecureBoot,Enable
+Allow3rdPartyUEFICA,Disable
+DeviceGuard,Disable
+DashEnabled,Disable
+ThinkShieldsecurewipe,Disable
+ThinkShieldPasswordlessPowerOnAuthentication,Disable
+BootMode,Quick
+StartupOptionKeys,Disable
+BootDeviceListF12Option,Enable
+BootOrder,USBCD:USBFDD:NVMe0:USBHDD:PXEBOOT:LENOVOCLOUD:ON-PREMISE
+NetworkBoot,PXEBOOT
+BootOrderLock,Disable
+WiFiNetworkBoot,Disable
+LenovoCloudServices,Disable
+SetupUI,SimpleText
+ChargeInBatteryMode,Disable
+StrongPassword,Disable
+KeyboardLayout,English_US
+WakeUponAlarm,Disable
+AlarmTime,00:00:00
+AlarmDate,01/01/2022
+AlarmDayofWeek,Sunday
+UserDefinedAlarmSunday,Disable
+UserDefinedAlarmMonday,Disable
+UserDefinedAlarmTuesday,Disable
+UserDefinedAlarmWednesday,Disable
+UserDefinedAlarmThursday,Disable
+UserDefinedAlarmFriday,Disable
+UserDefinedAlarmSaturday,Disable
+UserDefinedAlarmTime,00:00:00
+CoolQuietOnLap,Disable
+ePrivacyLock,Disable
+TSME,Enable
+HDMIModeSelect,HDMI2.0
+TpmSelection,PlutonTPM2.0
+PlutonSecurityProcessor,Enable
+"@ 
+
+$separator = ','
+$TempFile = New-TemporaryFile
+$WordbankFile = New-TemporaryFile
+
+"Setting,Value" | Out-File -FilePath $WordbankFile.FullName -Encoding UTF8 -Append
+
+foreach ($row in $CSV_Wordbank) {
+    $setting, $value = $row.Split($separator, 2)
+    "$setting,$value" | Out-File -FilePath $WordbankFile.FullName -Encoding UTF8 -Append
+}
+
+try {
+    # Write the header row to the temporary file
+    "Setting,Value" | Out-File -FilePath $TempFile.FullName -Encoding UTF8 -Append
+    # Write the data to the temporary file
+    gwmi -class Lenovo_BiosSetting -namespace root\wmi  | select-object currentsetting | Where-Object {$_.CurrentSetting -ne ""} | select-object @{label = "Setting"; expression = {$_.currentsetting.split(",")[0]}} , 
+    @{label = "Value"; expression = {$_.currentsetting.split(",*;[")[1]}} | Export-Csv -Path $TempFile.FullName -Encoding UTF8 -Append -NoTypeInformation
+}
+catch {
+    Write-Host "Failed to write settings to CSV file"
+    EXIT 1
+}
+
+$Exported_CSV = $TempFile.FullName
+
+$csv = Import-Csv $Exported_CSV
+$wordbank_csv = Import-Csv $WordbankFile.FullName
+$non_conform_count = 0
+
+# Check if BIOS password is required
+$BIOSPassword = $null
+$BiosPwdRequired = (Get-WmiObject -Class Lenovo_SetBiosPassword -Namespace root\wmi).PasswordState
+if ($BiosPwdRequired -eq "SetSupervisorPassword") {
+    $BIOSPassword = "Supervisor"
+}
+
+foreach ($row in $wordbank_csv) {
+    $setting = $row.Setting
+    $value = $row.Value
+    $matching_row = $csv | Where-Object { $_.Setting -eq $setting }
+    if ($matching_row) {
+        if ($matching_row.Value -eq $value) {
+            
+        } else {
+            $line_number = $csv.IndexOf($matching_row) + 2  # add 2 to account for header row and zero-based index
+            Write-Host "The setting '$setting' on line $line_number in the CSV file is not conform"
+            Write-Host "Current setting value is: $($matching_row.Value)"
+            Write-Host "Setting should have value: $value`n"
+            $non_conform_count++
+
+            # Change the non-conform setting
+            if ($BIOSPassword) {
+                $BIOS = gwmi -class Lenovo_SetBiosSetting -namespace root\wmi -Password $BIOSPassword
+                $result = $BIOS.SetBiosSetting("$setting,$value",$null,$BIOSPassword)
+                if ($result.return -eq "Success") {
+                    Write-Host "'$setting' changed to value '$value'"
+                    # Save the changed setting to BIOS
+                    $Save_BIOS = (gwmi -class Lenovo_SaveBiosSettings -namespace root\wmi -Password $BIOSPassword)
+                    $BiosChanged = $Save_BIOS.SaveBiosSettings()
+                } else {
+                    Write-Host
+                    "Failed to change setting '$setting'"
+                }
+            } else {
+                # BIOS password is not required
+                $result = (gwmi -class Lenovo_SetBiosSetting -namespace root\wmi).SetBiosSetting("$setting,$value")
+                if ($result.return -eq "Success") {
+                    Write-Host "'$setting' changed to value '$value'"
+                    # Save the changed setting to BIOS
+                    $Save_BIOS = (gwmi -class Lenovo_SaveBiosSettings -namespace root\wmi)
+                    $BiosChanged = $Save_BIOS.SaveBiosSettings()
+                } else {
+                    Write-Host "Failed to change setting '$setting'"
+                }
+            }
+        }
+    } else {
+        Write-Host "The setting '$setting' does not exist in current BIOS settings"
+        $non_conform_count++
+
+        # Change the non-existent setting
+        if ($BIOSPassword) {
+            $BIOS = gwmi -class Lenovo_SetBiosSetting -namespace root\wmi -Password $BIOSPassword
+            $result = $BIOS.SetBiosSetting("$setting,$value",$null,$BIOSPassword)
+            if ($result.return -eq "Success") {
+                Write-Host "Setting '$setting' added with value '$value'"
+            } else {
+                Write-Host "Failed to add setting '$setting'"
+            }
+        } else {
+            # BIOS password is not required
+            $result = (gwmi -class Lenovo_SetBiosSetting -namespace root\wmi).SetBiosSetting("$setting,$value")
+            if ($result.return -eq "Success") {
+                Write-Host "Setting '$setting' added with value '$value'"
+            } else {
+                Write-Host "Failed to add setting '$setting'"
+            }
+        }
+    }
+}
+
+if ($non_conform_count -eq 0) {
+Write-Host "All settings are conform"
+} else {
+Write-Host "$non_conform_count non-conform settings found"
+}
+
+Remove-Item $WordbankFile.FullName -Force
+Remove-Item $TempFile.FullName -Force
