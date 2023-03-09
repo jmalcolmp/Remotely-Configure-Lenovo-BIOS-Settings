@@ -1,4 +1,4 @@
-# Lenovo-BIOS-Settings-Detection
+# Lenovo-BIOS-Settings
 Disclaimer: You will still have to set the BIOS Supervisor Password manually if there is not one already on the device.
 
 These scripts will let you manage BIOS settings for your Lenovo device using PowerShell. They will detect your current settings and compare them to the "Good" values listed in the variable $CSV_wordbank. Essentially it creates two temporary csv files and compares them side by side. Those not in line with the "Good" values listed in the CSV_wordbank will be displayed to the host or changed depending on if you used the detection or remediation script. 
