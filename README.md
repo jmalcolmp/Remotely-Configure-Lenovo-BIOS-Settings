@@ -4,3 +4,5 @@ These scripts will let you manage BIOS settings for your Lenovo device using Pow
 There is a spot for the BIOS password if you configured a Supervisor Password for your device. I left mine as "Supervisor" to make the variable that inputs the current supervisor password more obvious. In regards to the remediation and detection scripts, at the end of the script it deletes the temporary files that it created. 
 
 These scripts work well with Proactive remediations in Microsoft Intune/Endpoint if you are a system administrator. 
+
+Disclaimer: You will still have to set the BIOS Supervisor Password manually if there is not one already on the device.
